@@ -1,4 +1,7 @@
 venv
 __pycache__
-test.py
-teste.pdf
+test*.py
+*.pdf
+*.png
+*.jpg
+*jpeg

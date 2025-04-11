@@ -19,14 +19,13 @@ class LigthPDF(FPDF):
         return self.w - 2 * self.l_margin
 
     # Renderiza uma imagem no PDF e coloca o cursor abaixo dela
-    def renderImage(self, filename, prop_w=None, align=None, y_adic_new_page=None):  # noqa: E501
-        """ Define uma imagem no PDF e coloca o cursor abaixo dela.
-            O tamanho daimagem deve ser definido em relação à largura
-            da página. O parâmetro 'prop_w' é um valor entre 0 e 100
-            que corresponde ao percentual da largura da página que a
-            imagem deve ocupar. Sua altura é automaticamente definida
-            com base na proporção entre altura e largura da própria
-            imagem
+    def renderImage(self, filename, prop_w=None, align=None, y_adic_new_page=None, coord=None):  # noqa: E501
+        """
+        Define uma imagem no PDF e coloca o cursor abaixo dela. O tamanho da
+        imagem deve ser definido em relação à largura da página (parâmetro
+        'prop_w') e alinhado conforme o parâmetro 'align'. Alternativamente
+        pode ser informada a tupla 'coord' com as coordenadas x e y do canto
+        superior esquerdo da imagem e com a largura desejada em mm
 
         Args:
           - filename (obrigatório): Caminho/nome do arquivo da imagem
@@ -39,15 +38,19 @@ class LigthPDF(FPDF):
           ou 'R'. Se não for informado alinha ao centro
           - y_adic_new_page (opcional): incremento para a posição vertical,
           caso a imagem ultrapasse a margem inferior da página e seja
-          enderizada na próxima página
+          renderizada na próxima página
+          - coord (opcional): tupla com as coordenadas do canto superior
+          esquerdo da imagem e sua largura em mm. Se for informada
+          desconsidera 'prop_w' e 'align'
         """
 
+        # Posição vertical atual do cursor
         y = self.get_y()
 
-        # Para obter as dimensõres reais da imagem em pixels
+        # Instanciando objeto Image a partir do caminho da imagem
         img = Image.open(filename)
 
-        # Capturando as dimensões da imagem
+        # Capturando as dimensões da imagem em pixels
         W_img, H_img = img.size
 
         # Razão entre largura e altura
@@ -56,43 +59,84 @@ class LigthPDF(FPDF):
         # Largura da página descontando as margens
         W_pg = self.w - self.l_margin - self.r_margin
 
-        # Altura da página descontando as margens
-        # H_pg = self.get_max_y() - self.t_margin
+        # Tupla 'coord' com posições x e y da imagem e sua largura
+        # foi informada. Renderizando imagem com essas informações
+        if coord is not None and type(coord) is tuple:
+            # Distância entre o cursor e limite direito da página
+            w_pg_disp = self.w - self.l_margin - self.r_margin
 
-        # Dimensões da imagem em milímetros
-        if prop_w is None:
-            prop_w = 100
-        W_img = W_pg * prop_w / 100
-        H_img = W_img / W_H
+            # Altura da imagem em relação à largura informada na tupla
+            h_img = coord[2] / W_H
 
-        # Se a base da imagem ultrapassar a margem inferior, quebra a página
-        # Posição y da base da imagem na página
-        Y = y + H_img
-        # Coordenada y que é o limite para ultrapassar a margem inferior
-        Y_lim = self.h - self.b_margin
-        if Y > Y_lim:
-            self.add_page()
-            y = self.t_margin if y_adic_new_page is None else y_adic_new_page + self.t_margin  # noqa: E501
+            # Flag para indicar se não ultrapassa margem direita
+            fit_rigth_margin = coord[2] <= w_pg_disp
 
-        # Posicionando o cursor de acordo com o parâmetro 'align'
-        match align:
-            case 'L':
-                x_img = self.l_margin
-            case 'R':
-                x_img = self.w - self.r_margin - W_img
-            case 'C':
-                x_img = self.l_margin + \
-                    (self.w - self.l_margin - self.r_margin - W_img) / 2
-            case _:
-                x_img = self.l_margin + \
-                    (self.w - self.l_margin - self.r_margin - W_img) / 2
-                self.set_x(x_img)
+            # Flag para indicar se não ultrapassa margem inferior
+            fit_bottom_margin = coord[1] + h_img <= self.b_margin
 
-        # Renderizando a imagem de acordo com a largura
-        self.image(filename, w=W_img, y=y, x=x_img)
+            if fit_rigth_margin and fit_bottom_margin:
+                self.image(filename, coord[0], coord[1], coord[2], h_img)
+            else:
+                msg = 'Detectado(s) o(s) seguinte(s) erro(s):\n'
+                msg += 'Largura da imagem excede margem direita\n' if not fit_bottom_margin else ''  # noqa: E501
+                msg += 'Altura da imagem excede margem inferior'
+                raise ValueError(msg)  # noqa: E501
 
-        # Posicionando o cursor abaixo da imagem
-        self.set_y(y + H_img)
+        # Não foi informada tupla. Renderizando imagem com base em 'prop_w'
+        else:
+            # Dimensões da imagem em milímetros
+            if prop_w is None:
+                prop_w = 100
+
+            # Validando se prop_w é um valor numérico entre 0 e 100
+            try:
+                if prop_w < 0:
+                    raise ValueError('"prop_w" não pode ser negativo')
+                W_img = W_pg * prop_w / 100
+            except Exception:
+                raise ValueError('"prop_w" deve ser uma valor numérico entre 0 e 100')  # noqa: E501
+
+            H_img = W_img / W_H
+
+            # Coordenada y que é o limite para ultrapassar a margem inferior
+            Y_lim = self.h - self.b_margin
+
+            # Coordenada y da base da imagem na página
+            Y = y + H_img
+
+            # Se a base da imagem ultrapassar a margem inferior, quebra a página  # noqa: E501
+            # Posição y da base da imagem na página
+            if Y > Y_lim:
+                self.add_page(same=True)
+
+                # Verificando se 'y_adic_new_page' fará com que a imagem ultrapasse  # noqa: E501
+                # a margem inferior
+                if self.t_margin + y_adic_new_page + H_img > Y_lim:
+                    msg = 'A altura da imagem ultrapassa a margem inferior. Reduza'  # noqa: E501
+                    msg += ' o valor de prop_w ou de y_adic_new_page'
+                    raise Exception(msg)
+
+                y = self.t_margin if y_adic_new_page is None else y_adic_new_page + self.t_margin  # noqa: E501
+
+            # Posicionando o cursor de acordo com o parâmetro 'align'
+            match align:
+                case 'L':
+                    x_img = self.l_margin
+                case 'R':
+                    x_img = self.w - self.r_margin - W_img
+                case 'C':
+                    x_img = self.l_margin + \
+                        (self.w - self.l_margin - self.r_margin - W_img) / 2
+                case _:
+                    x_img = self.l_margin + \
+                        (self.w - self.l_margin - self.r_margin - W_img) / 2
+                    self.set_x(x_img)
+
+            # Renderizando a imagem de acordo com a largura
+            self.image(filename, w=W_img, y=y, x=x_img)
+
+            # Posicionando o cursor abaixo da imagem
+            self.set_y(y + H_img)
 
     def cellBreakLine(self, txt, w, h):
         """
